@@ -24,8 +24,13 @@ class MainActivity : AppCompatActivity() {
     private val valueLabels = mutableListOf<TextView>()
 
     override fun onCreate(savedInstanceState: Bundle?) {
+        val defaultHandler = Thread.getDefaultUncaughtExceptionHandler()
+        Thread.setDefaultUncaughtExceptionHandler(CrashHandler(applicationContext, defaultHandler))
+
         super.onCreate(savedInstanceState)
         setContentView(R.layout.activity_main)
+
+        showLastCrashIfAny()
 
         val statusText = findViewById<TextView>(R.id.statusText)
         val permissionButton = findViewById<MaterialButton>(R.id.permissionButton)
@@ -171,6 +176,21 @@ class MainActivity : AppCompatActivity() {
             valueLabelsRow.addView(valueLabel)
             valueLabels.add(valueLabel)
         }
+    }
+
+    /**
+     * If the app crashed last time it ran, show the saved stack trace
+     * in a dialog on this launch so it can be read/screenshotted, then
+     * clear it so it doesn't reappear on every future launch.
+     */
+    private fun showLastCrashIfAny() {
+        val crashText = CrashHandler.readLastCrash(this) ?: return
+        androidx.appcompat.app.AlertDialog.Builder(this)
+            .setTitle("Last crash")
+            .setMessage(crashText)
+            .setPositiveButton("OK") { _, _ -> CrashHandler.clearLastCrash(this) }
+            .setCancelable(false)
+            .show()
     }
 
     private fun formatFrequencyLabel(hz: Int): String =
