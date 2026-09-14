@@ -6,7 +6,6 @@ import android.content.pm.PackageManager
 import android.os.Build
 import android.os.Bundle
 import android.view.Gravity
-import android.view.ViewGroup
 import android.widget.AdapterView
 import android.widget.ArrayAdapter
 import android.widget.LinearLayout
@@ -46,6 +45,7 @@ class MainActivity : AppCompatActivity() {
         )
         presetSpinner.onItemSelectedListener = object : AdapterView.OnItemSelectedListener {
             override fun onItemSelected(parent: AdapterView<*>?, view: android.view.View?, position: Int, id: Long) {
+                if (position !in presetLabels.indices) return
                 val label = presetLabels[position]
                 val intent = Intent(this@MainActivity, EqualizerService::class.java)
                 intent.action = EqualizerService.ACTION_SET_PRESET
@@ -60,14 +60,18 @@ class MainActivity : AppCompatActivity() {
         }
 
         serviceToggle.setOnCheckedChangeListener { _, isChecked ->
-            if (isChecked) {
-                val intent = Intent(this, EqualizerService::class.java)
-                intent.putExtra(EqualizerService.EXTRA_AUTO_MODE, autoModeToggle.isChecked)
-                ContextCompat.startForegroundService(this, intent)
-                statusText.text = "Service running"
-            } else {
-                stopService(Intent(this, EqualizerService::class.java))
-                statusText.text = "Service stopped"
+            try {
+                if (isChecked) {
+                    val intent = Intent(this, EqualizerService::class.java)
+                    intent.putExtra(EqualizerService.EXTRA_AUTO_MODE, autoModeToggle.isChecked)
+                    ContextCompat.startForegroundService(this, intent)
+                    statusText.text = "Service running"
+                } else {
+                    stopService(Intent(this, EqualizerService::class.java))
+                    statusText.text = "Service stopped"
+                }
+            } catch (e: Exception) {
+                statusText.text = "Service failed to start: ${e.message}"
             }
         }
 
@@ -84,8 +88,9 @@ class MainActivity : AppCompatActivity() {
 
     /**
      * Builds three aligned rows (frequency labels / vertical sliders /
-     * live value labels) so each column lines up like a hardware-style
-     * graphic EQ panel.
+     * live value labels). Sliders use a fixed pre-computed pixel size
+     * (converted from dp up front) instead of measuring the parent at
+     * runtime, which avoids relying on a post-layout callback.
      */
     private fun buildBandColumns(
         freqLabelsRow: LinearLayout,
@@ -97,6 +102,10 @@ class MainActivity : AppCompatActivity() {
         freqLabelsRow.removeAllViews()
         slidersRow.removeAllViews()
         valueLabelsRow.removeAllViews()
+
+        val density = resources.displayMetrics.density
+        val sliderLengthPx = (220 * density).toInt()
+        val sliderThicknessPx = (28 * density).toInt()
 
         BAND_FREQUENCIES.forEachIndexed { index, freqHz ->
             val colParams = LinearLayout.LayoutParams(0, LinearLayout.LayoutParams.WRAP_CONTENT, 1f)
@@ -111,42 +120,6 @@ class MainActivity : AppCompatActivity() {
             }
             freqLabelsRow.addView(freqLabel)
 
-            // Vertical slider via rotation trick: a SeekBar rotated -90
-            // degrees inside a square-ish container reads top-to-bottom.
-            val sliderContainer = LinearLayout(this).apply {
-                gravity = Gravity.CENTER
-                layoutParams = colParamsMatch
-            }
-            val seekBar = SeekBar(this).apply {
-                max = 240 // -12.0dB..+12.0dB in 0.1dB steps
-                progress = 120 // 0 dB
-                rotation = 270f
-                progressDrawable = ContextCompat.getDrawable(this@MainActivity, R.drawable.vertical_slider_track)
-                setOnSeekBarChangeListener(object : SeekBar.OnSeekBarChangeListener {
-                    override fun onProgressChanged(sb: SeekBar?, progress: Int, fromUser: Boolean) {
-                        val db = (progress - 120) / 10.0
-                        valueLabels[index].text = String.format("%.1f", db)
-                        if (!fromUser) return
-                        val millibel = (db * 100).toInt()
-                        val intent = Intent(this@MainActivity, EqualizerService::class.java)
-                        intent.action = EqualizerService.ACTION_SET_BAND
-                        intent.putExtra(EqualizerService.EXTRA_BAND_INDEX, index)
-                        intent.putExtra(EqualizerService.EXTRA_BAND_MILLIBEL, millibel)
-                        startService(intent)
-                    }
-                    override fun onStartTrackingTouch(sb: SeekBar?) {}
-                    override fun onStopTrackingTouch(sb: SeekBar?) {}
-                })
-            }
-            // Swap width/height so the rotated bar fills the column vertically
-            sliderContainer.post {
-                val h = sliderContainer.height
-                seekBar.layoutParams = ViewGroup.LayoutParams(h, 60)
-            }
-            sliderContainer.addView(seekBar)
-            slidersRow.addView(sliderContainer)
-            bandSeekBars.add(seekBar)
-
             val valueLabel = TextView(this).apply {
                 text = "0.0"
                 setTextColor(0xFF34D399.toInt())
@@ -154,6 +127,47 @@ class MainActivity : AppCompatActivity() {
                 gravity = Gravity.CENTER
                 layoutParams = colParams
             }
+
+            // Vertical slider via rotation trick, sized up front so no
+            // runtime remeasure/resize is needed.
+            val seekBar = SeekBar(this).apply {
+                max = 240 // -12.0dB..+12.0dB in 0.1dB steps
+                progress = 120 // 0 dB
+                rotation = 270f
+                layoutParams = LinearLayout.LayoutParams(sliderLengthPx, sliderThicknessPx)
+                try {
+                    progressDrawable = ContextCompat.getDrawable(this@MainActivity, R.drawable.vertical_slider_track)
+                } catch (_: Exception) {
+                    // Fall back to the system default drawable if the custom one fails to load
+                }
+            }
+
+            val sliderContainer = LinearLayout(this).apply {
+                gravity = Gravity.CENTER
+                layoutParams = colParamsMatch
+                addView(seekBar)
+            }
+            slidersRow.addView(sliderContainer)
+            bandSeekBars.add(seekBar)
+
+            // Listener attached after the SeekBar is fully configured and
+            // added, so an index lookup here always has a matching label.
+            seekBar.setOnSeekBarChangeListener(object : SeekBar.OnSeekBarChangeListener {
+                override fun onProgressChanged(sb: SeekBar?, progress: Int, fromUser: Boolean) {
+                    val db = (progress - 120) / 10.0
+                    valueLabel.text = String.format("%.1f", db)
+                    if (!fromUser) return
+                    val millibel = (db * 100).toInt()
+                    val intent = Intent(this@MainActivity, EqualizerService::class.java)
+                    intent.action = EqualizerService.ACTION_SET_BAND
+                    intent.putExtra(EqualizerService.EXTRA_BAND_INDEX, index)
+                    intent.putExtra(EqualizerService.EXTRA_BAND_MILLIBEL, millibel)
+                    startService(intent)
+                }
+                override fun onStartTrackingTouch(sb: SeekBar?) {}
+                override fun onStopTrackingTouch(sb: SeekBar?) {}
+            })
+
             valueLabelsRow.addView(valueLabel)
             valueLabels.add(valueLabel)
         }
