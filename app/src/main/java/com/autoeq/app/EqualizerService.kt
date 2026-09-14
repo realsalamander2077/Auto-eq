@@ -15,21 +15,20 @@ import kotlin.math.max
 import kotlin.math.min
 
 /**
- * Attaches an Equalizer + Visualizer to audio session 0 (the general
- * output mix on most devices) and continuously adjusts gain toward a
- * target curve built from three layers:
+ * Attaches an Equalizer + Visualizer to the REAL audio session that a
+ * playback app (Spotify, YouTube Music, etc.) reports via the system
+ * broadcasts ACTION_OPEN_AUDIO_EFFECT_CONTROL_SESSION / _CLOSE_ - this
+ * is the actual supported mechanism third-party equalizer apps use.
  *
- *   1. Live spectrum analysis (what's actually playing right now)
- *   2. A fixed equal-loudness compensation curve (how human hearing
- *      perceives different frequencies at the same physical level)
- *   3. An optional named preset offset (Bass Boost, Vocal Clarity, etc)
+ * The earlier "attach to session 0" approach looked like it worked
+ * (the Equalizer object constructed without throwing) but carried no
+ * real audio on this device, confirmed by the Visualizer failing to
+ * initialize with "error: -3" and zero frames ever being analyzed.
+ * Attaching to the real session ID fixes that at the root.
  *
- * The result is smoothed with separate attack/release time constants
- * so it doesn't audibly jitter on every transient, only reacts to the
- * genuine tonal balance of a track.
- *
- * Same caveats as before: best-effort on session 0, not guaranteed on
- * every OEM/app combination (DRM/offloaded audio can bypass it).
+ * Still best-effort: it only works for apps that actually send these
+ * broadcasts (most mainstream players do, but not universally), and a
+ * session can close/reopen as tracks change, which is handled below.
  */
 class EqualizerService : Service() {
 
@@ -41,24 +40,21 @@ class EqualizerService : Service() {
         const val ACTION_SET_AUTO_MODE = "com.autoeq.app.SET_AUTO_MODE"
         const val ACTION_SET_PRESET = "com.autoeq.app.SET_PRESET"
         const val ACTION_REQUEST_STATUS = "com.autoeq.app.REQUEST_STATUS"
+        const val ACTION_SESSION_OPENED = "com.autoeq.app.SESSION_OPENED"
+        const val ACTION_SESSION_CLOSED = "com.autoeq.app.SESSION_CLOSED"
         const val EXTRA_BAND_INDEX = "band_index"
         const val EXTRA_BAND_MILLIBEL = "band_millibel"
         const val EXTRA_PRESET_LABEL = "preset_label"
+        const val EXTRA_SESSION_ID = "session_id"
+        const val EXTRA_SESSION_PACKAGE = "session_package"
 
         const val ACTION_STATUS_UPDATE = "com.autoeq.app.STATUS_UPDATE"
         const val EXTRA_EQ_STATUS = "eq_status"
         const val EXTRA_VIZ_STATUS = "viz_status"
         const val EXTRA_CAPTURE_COUNT = "capture_count"
 
-        private const val GLOBAL_SESSION = 0
-
-        // Smoothing time constants (seconds). Release is slower than
-        // attack so the curve settles gently instead of pumping.
         private const val ATTACK_SECONDS = 0.12
         private const val RELEASE_SECONDS = 0.6
-
-        // Practical middle point for the 0-255 FFT magnitude range
-        // Android's Visualizer returns - not a calibrated SPL value.
         private const val TARGET_MAGNITUDE = 42.0
         private const val MAX_GAIN_DB = 12.0
         private const val MIN_GAIN_DB = -12.0
@@ -66,26 +62,27 @@ class EqualizerService : Service() {
 
     private var equalizer: Equalizer? = null
     private var visualizer: Visualizer? = null
+    private var attachedSessionId: Int? = null
+    private var attachedPackageName: String = ""
+
     private var autoMode = true
     private var currentPreset: EqPreset = EqPreset.FLAT
 
-    // One smoothed gain value (dB) per logical band (BAND_FREQUENCIES.size)
     private var smoothedGainsDb = DoubleArray(BAND_FREQUENCIES.size)
 
-    // Hardware band count/range, resolved once the Equalizer is created
     private var hwBandCount: Int = 0
     private var hwMinMb: Int = -1200
     private var hwMaxMb: Int = 1200
 
-    private var lastEqStatus: String = "Not yet attempted"
-    private var lastVizStatus: String = "Not yet attempted"
+    private var lastEqStatus: String = "Waiting for a playback app to start (open Spotify and play something)"
+    private var lastVizStatus: String = "Not yet attached"
     private var captureCount: Int = 0
 
     override fun onCreate() {
         super.onCreate()
         createNotificationChannel()
-        startForeground(NOTIF_ID, buildNotification("Starting…"))
-        setupEqualizer()
+        startForeground(NOTIF_ID, buildNotification("Waiting for audio session…"))
+        broadcastStatus()
     }
 
     override fun onStartCommand(intent: Intent?, flags: Int, startId: Int): Int {
@@ -109,34 +106,52 @@ class EqualizerService : Service() {
             ACTION_REQUEST_STATUS -> {
                 broadcastStatus()
             }
+            ACTION_SESSION_OPENED -> {
+                val sessionId = intent.getIntExtra(EXTRA_SESSION_ID, -1)
+                val pkg = intent.getStringExtra(EXTRA_SESSION_PACKAGE) ?: "unknown"
+                if (sessionId != -1) attachToSession(sessionId, pkg)
+            }
+            ACTION_SESSION_CLOSED -> {
+                val sessionId = intent.getIntExtra(EXTRA_SESSION_ID, -1)
+                if (sessionId != -1 && sessionId == attachedSessionId) {
+                    detachCurrentSession("Session closed by $attachedPackageName - waiting for a new one")
+                }
+            }
         }
         return START_STICKY
     }
 
-    private fun setupEqualizer() {
-        var eqStatus: String
+    /**
+     * Attaches fresh Equalizer + Visualizer instances to a real,
+     * playback-reported audio session. Releases any previous session's
+     * effects first.
+     */
+    private fun attachToSession(sessionId: Int, packageName: String) {
+        if (attachedSessionId == sessionId) return // already on it
+        releaseEffects()
+
+        attachedSessionId = sessionId
+        attachedPackageName = packageName
+
         try {
-            equalizer = Equalizer(0, GLOBAL_SESSION).apply {
-                enabled = true
-            }
+            equalizer = Equalizer(0, sessionId).apply { enabled = true }
             val eq = equalizer
             if (eq != null) {
                 hwBandCount = eq.numberOfBands.toInt().coerceAtLeast(1)
                 val range = eq.bandLevelRange
                 hwMinMb = range[0].toInt()
                 hwMaxMb = range[1].toInt()
-                eqStatus = "Equalizer attached OK ($hwBandCount hardware bands, range ${hwMinMb / 100}..${hwMaxMb / 100} dB)"
+                lastEqStatus = "Attached to $packageName (session $sessionId), $hwBandCount hardware bands"
             } else {
-                eqStatus = "Equalizer object is null after construction (unknown failure)"
+                lastEqStatus = "Equalizer null after construction for session $sessionId"
             }
         } catch (e: Exception) {
             equalizer = null
-            eqStatus = "Equalizer FAILED to attach: ${e.javaClass.simpleName}: ${e.message}"
+            lastEqStatus = "FAILED for session $sessionId: ${e.javaClass.simpleName}: ${e.message}"
         }
 
-        var vizStatus: String
         try {
-            visualizer = Visualizer(GLOBAL_SESSION).apply {
+            visualizer = Visualizer(sessionId).apply {
                 captureSize = Visualizer.getCaptureSizeRange()[1]
                 setDataCaptureListener(object : Visualizer.OnDataCaptureListener {
                     override fun onWaveFormDataCapture(v: Visualizer?, waveform: ByteArray?, samplingRate: Int) {}
@@ -145,21 +160,39 @@ class EqualizerService : Service() {
                         if (autoMode && fft != null && fft.size >= 4) {
                             analyzeAndAdjust(fft, samplingRate)
                         }
-                        broadcastStatus()
+                        if (captureCount % 10 == 0) broadcastStatus()
                     }
                 }, Visualizer.getMaxCaptureRate() / 2, false, true)
                 enabled = true
             }
-            vizStatus = "Visualizer attached OK"
+            lastVizStatus = "Attached to session $sessionId"
         } catch (e: Exception) {
             visualizer = null
-            vizStatus = "Visualizer FAILED to attach: ${e.javaClass.simpleName}: ${e.message}"
+            lastVizStatus = "FAILED for session $sessionId: ${e.javaClass.simpleName}: ${e.message}"
         }
 
-        lastEqStatus = eqStatus
-        lastVizStatus = vizStatus
         updateNotification()
         broadcastStatus()
+    }
+
+    private fun detachCurrentSession(reason: String) {
+        releaseEffects()
+        attachedSessionId = null
+        attachedPackageName = ""
+        lastEqStatus = reason
+        lastVizStatus = "Not attached"
+        captureCount = 0
+        updateNotification()
+        broadcastStatus()
+    }
+
+    private fun releaseEffects() {
+        try { visualizer?.enabled = false } catch (_: Exception) {}
+        try { visualizer?.release() } catch (_: Exception) {}
+        try { equalizer?.enabled = false } catch (_: Exception) {}
+        try { equalizer?.release() } catch (_: Exception) {}
+        visualizer = null
+        equalizer = null
     }
 
     private fun broadcastStatus() {
@@ -172,18 +205,6 @@ class EqualizerService : Service() {
         sendBroadcast(intent)
     }
 
-    /**
-     * Core analysis pass, called a few times per second:
-     *   1. Buckets FFT bins into our 10 logical bands by actual
-     *      frequency (log-spaced, not equal bin counts).
-     *   2. Computes a raw target gain per band from how loud that band
-     *      is relative to TARGET_MAGNITUDE (real 20*log10 dB math).
-     *   3. Adds the equal-loudness compensation and any active preset
-     *      offset.
-     *   4. Clamps, then smooths toward it with attack/release.
-     *   5. Maps the 10 logical bands onto whatever band count the
-     *      device's actual hardware Equalizer supports.
-     */
     private fun analyzeAndAdjust(fft: ByteArray, sampleRate: Int) {
         val eq = equalizer ?: return
         if (hwBandCount <= 0) return
@@ -195,9 +216,7 @@ class EqualizerService : Service() {
 
         for (b in BAND_FREQUENCIES.indices) {
             val centerHz = BAND_FREQUENCIES[b].toDouble()
-            if (centerHz >= nyquist) {
-                continue
-            }
+            if (centerHz >= nyquist) continue
 
             val lowHz = centerHz / 1.5
             val highHz = min(centerHz * 1.5, nyquist - 1.0)
@@ -222,7 +241,6 @@ class EqualizerService : Service() {
             if (rms <= 0.0) continue
 
             val diffDb = 20.0 * ln(TARGET_MAGNITUDE / max(rms, 1.0)) / ln(10.0)
-
             val loudnessOffset = EQUAL_LOUDNESS_OFFSET_DB.getOrElse(b) { 0.0 }
             val presetOffset = currentPreset.offsetsDb.getOrElse(b) { 0.0 }
 
@@ -241,11 +259,6 @@ class EqualizerService : Service() {
         applySmoothedGainsToHardware(eq)
     }
 
-    /**
-     * Maps our fixed 10 logical bands onto however many bands the real
-     * device Equalizer exposes (commonly 5-6 on many phones). Bands are
-     * averaged together when the hardware has fewer bands than we do.
-     */
     private fun applySmoothedGainsToHardware(eq: Equalizer) {
         for (hwIndex in 0 until hwBandCount) {
             val loLogical = (hwIndex * BAND_FREQUENCIES.size) / hwBandCount
@@ -300,17 +313,15 @@ class EqualizerService : Service() {
 
     private fun updateNotification() {
         val mode = if (autoMode) "Auto" else "Manual"
-        val status = "$mode - ${currentPreset.label}"
+        val target = if (attachedSessionId != null) attachedPackageName else "no session"
+        val status = "$mode - ${currentPreset.label} - $target"
         val nm = getSystemService(NotificationManager::class.java)
         nm.notify(NOTIF_ID, buildNotification(status))
     }
 
     override fun onDestroy() {
         super.onDestroy()
-        try { visualizer?.enabled = false } catch (_: Exception) {}
-        try { visualizer?.release() } catch (_: Exception) {}
-        try { equalizer?.enabled = false } catch (_: Exception) {}
-        try { equalizer?.release() } catch (_: Exception) {}
+        releaseEffects()
     }
 
     override fun onBind(intent: Intent?): IBinder? = null

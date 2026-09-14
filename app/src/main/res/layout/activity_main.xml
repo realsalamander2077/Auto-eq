@@ -121,7 +121,7 @@
             android:layout_width="match_parent"
             android:layout_height="wrap_content"
             android:layout_marginTop="12dp"
-            android:text="Note: works on the mix session Android exposes to apps (session 0). Coverage varies by device and by app — some apps (exclusive/offloaded audio, some DRM playback) can't be reached this way. This is the same technique used by third-party system EQ apps; it is not guaranteed on every device."
+            android:text="Note: attaches to the real audio session a playback app reports when it starts - so after enabling the service, pause and replay the current track (or skip to the next one) so Spotify opens a fresh session for this app to catch. Not every app sends this broadcast; coverage varies by device and app."
             android:textColor="#6B7280"
             android:textSize="11sp" />
 
