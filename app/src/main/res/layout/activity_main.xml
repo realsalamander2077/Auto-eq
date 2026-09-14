@@ -81,6 +81,18 @@
             android:textColor="#9CA3AF"
             android:textSize="14sp" />
 
+        <TextView
+            android:id="@+id/diagnosticsText"
+            android:layout_width="match_parent"
+            android:layout_height="wrap_content"
+            android:layout_marginTop="8dp"
+            android:padding="10dp"
+            android:background="@drawable/card_background"
+            android:text="No diagnostics yet - enable the service to see live status here."
+            android:textColor="#F9FAFB"
+            android:textSize="11sp"
+            android:fontFamily="monospace" />
+
         <Button
             android:id="@+id/permissionButton"
             android:layout_width="match_parent"

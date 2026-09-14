@@ -1,6 +1,7 @@
 package com.autoeq.app
 
 import android.Manifest
+import android.content.Context
 import android.content.Intent
 import android.content.pm.PackageManager
 import android.os.Build
@@ -22,6 +23,17 @@ class MainActivity : AppCompatActivity() {
 
     private val bandSeekBars = mutableListOf<SeekBar>()
     private val valueLabels = mutableListOf<TextView>()
+    private lateinit var diagnosticsText: TextView
+
+    private val statusReceiver = object : android.content.BroadcastReceiver() {
+        override fun onReceive(context: android.content.Context?, intent: Intent?) {
+            val eqStatus = intent?.getStringExtra(EqualizerService.EXTRA_EQ_STATUS) ?: return
+            val vizStatus = intent.getStringExtra(EqualizerService.EXTRA_VIZ_STATUS) ?: ""
+            val captureCount = intent.getIntExtra(EqualizerService.EXTRA_CAPTURE_COUNT, 0)
+            diagnosticsText.text = "EQ: $eqStatus\nAnalyzer: $vizStatus\nAudio frames analyzed so far: $captureCount" +
+                if (captureCount == 0) "\n\n⚠️ 0 frames analyzed means the analyzer isn't receiving any audio from what's playing - the EQ has nothing to react to, even if it attached successfully." else ""
+        }
+    }
 
     override fun onCreate(savedInstanceState: Bundle?) {
         val defaultHandler = Thread.getDefaultUncaughtExceptionHandler()
@@ -41,6 +53,18 @@ class MainActivity : AppCompatActivity() {
         val freqLabelsRow = findViewById<LinearLayout>(R.id.freqLabelsRow)
         val slidersRow = findViewById<LinearLayout>(R.id.slidersRow)
         val valueLabelsRow = findViewById<LinearLayout>(R.id.valueLabelsRow)
+        diagnosticsText = findViewById(R.id.diagnosticsText)
+
+        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.TIRAMISU) {
+            registerReceiver(
+                statusReceiver,
+                android.content.IntentFilter(EqualizerService.ACTION_STATUS_UPDATE),
+                Context.RECEIVER_NOT_EXPORTED
+            )
+        } else {
+            @Suppress("UnspecifiedRegisterReceiverFlag")
+            registerReceiver(statusReceiver, android.content.IntentFilter(EqualizerService.ACTION_STATUS_UPDATE))
+        }
 
         buildBandColumns(freqLabelsRow, slidersRow, valueLabelsRow)
 
@@ -191,6 +215,25 @@ class MainActivity : AppCompatActivity() {
             .setPositiveButton("OK") { _, _ -> CrashHandler.clearLastCrash(this) }
             .setCancelable(false)
             .show()
+    }
+
+    override fun onResume() {
+        super.onResume()
+        val intent = Intent(this, EqualizerService::class.java)
+        intent.action = EqualizerService.ACTION_REQUEST_STATUS
+        try {
+            startService(intent)
+        } catch (_: Exception) {
+            // Service isn't running yet (toggle is off) - nothing to request status from
+        }
+    }
+
+    override fun onDestroy() {
+        super.onDestroy()
+        try {
+            unregisterReceiver(statusReceiver)
+        } catch (_: Exception) {
+        }
     }
 
     private fun formatFrequencyLabel(hz: Int): String =

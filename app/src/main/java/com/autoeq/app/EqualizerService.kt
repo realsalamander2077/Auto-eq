@@ -40,9 +40,15 @@ class EqualizerService : Service() {
         const val ACTION_SET_BAND = "com.autoeq.app.SET_BAND"
         const val ACTION_SET_AUTO_MODE = "com.autoeq.app.SET_AUTO_MODE"
         const val ACTION_SET_PRESET = "com.autoeq.app.SET_PRESET"
+        const val ACTION_REQUEST_STATUS = "com.autoeq.app.REQUEST_STATUS"
         const val EXTRA_BAND_INDEX = "band_index"
         const val EXTRA_BAND_MILLIBEL = "band_millibel"
         const val EXTRA_PRESET_LABEL = "preset_label"
+
+        const val ACTION_STATUS_UPDATE = "com.autoeq.app.STATUS_UPDATE"
+        const val EXTRA_EQ_STATUS = "eq_status"
+        const val EXTRA_VIZ_STATUS = "viz_status"
+        const val EXTRA_CAPTURE_COUNT = "capture_count"
 
         private const val GLOBAL_SESSION = 0
 
@@ -71,6 +77,10 @@ class EqualizerService : Service() {
     private var hwMinMb: Int = -1200
     private var hwMaxMb: Int = 1200
 
+    private var lastEqStatus: String = "Not yet attempted"
+    private var lastVizStatus: String = "Not yet attempted"
+    private var captureCount: Int = 0
+
     override fun onCreate() {
         super.onCreate()
         createNotificationChannel()
@@ -96,11 +106,15 @@ class EqualizerService : Service() {
                     updateNotification()
                 }
             }
+            ACTION_REQUEST_STATUS -> {
+                broadcastStatus()
+            }
         }
         return START_STICKY
     }
 
     private fun setupEqualizer() {
+        var eqStatus: String
         try {
             equalizer = Equalizer(0, GLOBAL_SESSION).apply {
                 enabled = true
@@ -111,29 +125,51 @@ class EqualizerService : Service() {
                 val range = eq.bandLevelRange
                 hwMinMb = range[0].toInt()
                 hwMaxMb = range[1].toInt()
+                eqStatus = "Equalizer attached OK ($hwBandCount hardware bands, range ${hwMinMb / 100}..${hwMaxMb / 100} dB)"
+            } else {
+                eqStatus = "Equalizer object is null after construction (unknown failure)"
             }
         } catch (e: Exception) {
             equalizer = null
+            eqStatus = "Equalizer FAILED to attach: ${e.javaClass.simpleName}: ${e.message}"
         }
 
+        var vizStatus: String
         try {
             visualizer = Visualizer(GLOBAL_SESSION).apply {
                 captureSize = Visualizer.getCaptureSizeRange()[1]
                 setDataCaptureListener(object : Visualizer.OnDataCaptureListener {
                     override fun onWaveFormDataCapture(v: Visualizer?, waveform: ByteArray?, samplingRate: Int) {}
                     override fun onFftDataCapture(v: Visualizer?, fft: ByteArray?, samplingRate: Int) {
+                        captureCount++
                         if (autoMode && fft != null && fft.size >= 4) {
                             analyzeAndAdjust(fft, samplingRate)
                         }
+                        broadcastStatus()
                     }
                 }, Visualizer.getMaxCaptureRate() / 2, false, true)
                 enabled = true
             }
+            vizStatus = "Visualizer attached OK"
         } catch (e: Exception) {
             visualizer = null
+            vizStatus = "Visualizer FAILED to attach: ${e.javaClass.simpleName}: ${e.message}"
         }
 
+        lastEqStatus = eqStatus
+        lastVizStatus = vizStatus
         updateNotification()
+        broadcastStatus()
+    }
+
+    private fun broadcastStatus() {
+        val intent = Intent(ACTION_STATUS_UPDATE).apply {
+            setPackage(packageName)
+            putExtra(EXTRA_EQ_STATUS, lastEqStatus)
+            putExtra(EXTRA_VIZ_STATUS, lastVizStatus)
+            putExtra(EXTRA_CAPTURE_COUNT, captureCount)
+        }
+        sendBroadcast(intent)
     }
 
     /**
