@@ -8,21 +8,75 @@
         android:layout_width="match_parent"
         android:layout_height="wrap_content"
         android:orientation="vertical"
-        android:padding="24dp">
+        android:padding="16dp">
 
         <TextView
             android:layout_width="wrap_content"
             android:layout_height="wrap_content"
             android:text="⚡ Auto Equalizer"
             android:textColor="#F9FAFB"
-            android:textSize="24sp"
-            android:textStyle="bold" />
+            android:textSize="22sp"
+            android:textStyle="bold"
+            android:layout_marginBottom="12dp" />
+
+        <!-- Main EQ card, styled after a hardware/plugin EQ panel -->
+        <LinearLayout
+            android:layout_width="match_parent"
+            android:layout_height="wrap_content"
+            android:orientation="vertical"
+            android:background="@drawable/card_background"
+            android:padding="16dp">
+
+            <!-- Header row: preset name (left) + enable toggle (right) -->
+            <LinearLayout
+                android:layout_width="match_parent"
+                android:layout_height="wrap_content"
+                android:orientation="horizontal"
+                android:gravity="center_vertical"
+                android:layout_marginBottom="16dp">
+
+                <Spinner
+                    android:id="@+id/presetSpinner"
+                    android:layout_width="0dp"
+                    android:layout_height="wrap_content"
+                    android:layout_weight="1" />
+
+                <com.google.android.material.switchmaterial.SwitchMaterial
+                    android:id="@+id/serviceToggle"
+                    android:layout_width="wrap_content"
+                    android:layout_height="wrap_content" />
+            </LinearLayout>
+
+            <!-- Frequency labels row -->
+            <LinearLayout
+                android:id="@+id/freqLabelsRow"
+                android:layout_width="match_parent"
+                android:layout_height="wrap_content"
+                android:orientation="horizontal" />
+
+            <!-- Vertical slider bank -->
+            <LinearLayout
+                android:id="@+id/slidersRow"
+                android:layout_width="match_parent"
+                android:layout_height="260dp"
+                android:orientation="horizontal"
+                android:layout_marginTop="4dp" />
+
+            <!-- Live dB value labels row -->
+            <LinearLayout
+                android:id="@+id/valueLabelsRow"
+                android:layout_width="match_parent"
+                android:layout_height="wrap_content"
+                android:orientation="horizontal"
+                android:layout_marginTop="4dp" />
+
+        </LinearLayout>
 
         <TextView
             android:id="@+id/statusText"
             android:layout_width="wrap_content"
             android:layout_height="wrap_content"
-            android:layout_marginTop="4dp"
+            android:layout_marginTop="16dp"
             android:text="Service stopped"
             android:textColor="#9CA3AF"
             android:textSize="14sp" />
@@ -31,71 +85,30 @@
             android:id="@+id/permissionButton"
             android:layout_width="match_parent"
             android:layout_height="wrap_content"
-            android:layout_marginTop="20dp"
+            android:layout_marginTop="12dp"
             android:text="Grant Audio Permission" />
-
-        <com.google.android.material.switchmaterial.SwitchMaterial
-            android:id="@+id/serviceToggle"
-            android:layout_width="wrap_content"
-            android:layout_height="wrap_content"
-            android:layout_marginTop="16dp"
-            android:text="Enable system-wide Auto-EQ"
-            android:textColor="#F9FAFB" />
 
         <com.google.android.material.switchmaterial.SwitchMaterial
             android:id="@+id/autoModeToggle"
             android:layout_width="wrap_content"
             android:layout_height="wrap_content"
-            android:layout_marginTop="8dp"
+            android:layout_marginTop="16dp"
             android:checked="true"
-            android:text="Auto mode (analyze &amp; adjust automatically)"
+            android:text="Auto mode (analyze &amp; adjust automatically — sliders show manual override)"
             android:textColor="#F9FAFB" />
 
         <TextView
             android:layout_width="match_parent"
             android:layout_height="wrap_content"
-            android:layout_marginTop="24dp"
-            android:text="Manual bands (used when Auto mode is off)"
-            android:textColor="#9CA3AF"
-            android:textSize="12sp" />
-
-        <LinearLayout
-            android:layout_width="match_parent"
-            android:layout_height="wrap_content"
-            android:layout_marginTop="8dp"
-            android:orientation="vertical">
-
-            <LinearLayout android:layout_width="match_parent" android:layout_height="wrap_content" android:orientation="horizontal" android:gravity="center_vertical">
-                <TextView android:layout_width="80dp" android:layout_height="wrap_content" android:text="60 Hz" android:textColor="#9CA3AF" />
-                <SeekBar android:id="@+id/band0" android:layout_width="0dp" android:layout_weight="1" android:layout_height="wrap_content" android:max="30" android:progress="15" />
-            </LinearLayout>
-
-            <LinearLayout android:layout_width="match_parent" android:layout_height="wrap_content" android:orientation="horizontal" android:gravity="center_vertical">
-                <TextView android:layout_width="80dp" android:layout_height="wrap_content" android:text="250 Hz" android:textColor="#9CA3AF" />
-                <SeekBar android:id="@+id/band1" android:layout_width="0dp" android:layout_weight="1" android:layout_height="wrap_content" android:max="30" android:progress="15" />
-            </LinearLayout>
-
-            <LinearLayout android:layout_width="match_parent" android:layout_height="wrap_content" android:orientation="horizontal" android:gravity="center_vertical">
-                <TextView android:layout_width="80dp" android:layout_height="wrap_content" android:text="1 kHz" android:textColor="#9CA3AF" />
-                <SeekBar android:id="@+id/band2" android:layout_width="0dp" android:layout_weight="1" android:layout_height="wrap_content" android:max="30" android:progress="15" />
-            </LinearLayout>
-
-            <LinearLayout android:layout_width="match_parent" android:layout_height="wrap_content" android:orientation="horizontal" android:gravity="center_vertical">
-                <TextView android:layout_width="80dp" android:layout_height="wrap_content" android:text="4 kHz" android:textColor="#9CA3AF" />
-                <SeekBar android:id="@+id/band3" android:layout_width="0dp" android:layout_weight="1" android:layout_height="wrap_content" android:max="30" android:progress="15" />
-            </LinearLayout>
-
-            <LinearLayout android:layout_width="match_parent" android:layout_height="wrap_content" android:orientation="horizontal" android:gravity="center_vertical">
-                <TextView android:layout_width="80dp" android:layout_height="wrap_content" android:text="16 kHz" android:textColor="#9CA3AF" />
-                <SeekBar android:id="@+id/band4" android:layout_width="0dp" android:layout_weight="1" android:layout_height="wrap_content" android:max="30" android:progress="15" />
-            </LinearLayout>
-
-        </LinearLayout>
+            android:layout_marginTop="20dp"
+            android:text="How the auto curve works: live spectrum analysis + a fixed equal-loudness compensation curve (bass/treble are perceived quieter than mids at equal physical level) + your chosen preset offset, smoothed with attack/release so it doesn't jitter on every beat."
+            android:textColor="#6B7280"
+            android:textSize="11sp" />
 
         <TextView
             android:layout_width="match_parent"
             android:layout_height="wrap_content"
-            android:layout_marginTop="24dp"
+            android:layout_marginTop="12dp"
             android:text="Note: works on the mix session Android exposes to apps (session 0). Coverage varies by device and by app — some apps (exclusive/offloaded audio, some DRM playback) can't be reached this way. This is the same technique used by third-party system EQ apps; it is not guaranteed on every device."
             android:textColor="#6B7280"
             android:textSize="11sp" />
