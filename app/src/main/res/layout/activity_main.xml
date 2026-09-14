@@ -1,0 +1,104 @@
+<?xml version="1.0" encoding="utf-8"?>
+<ScrollView xmlns:android="http://schemas.android.com/apk/res/android"
+    android:layout_width="match_parent"
+    android:layout_height="match_parent"
+    android:background="#0B0F19">
+
+    <LinearLayout
+        android:layout_width="match_parent"
+        android:layout_height="wrap_content"
+        android:orientation="vertical"
+        android:padding="24dp">
+
+        <TextView
+            android:layout_width="wrap_content"
+            android:layout_height="wrap_content"
+            android:text="⚡ Auto Equalizer"
+            android:textColor="#F9FAFB"
+            android:textSize="24sp"
+            android:textStyle="bold" />
+
+        <TextView
+            android:id="@+id/statusText"
+            android:layout_width="wrap_content"
+            android:layout_height="wrap_content"
+            android:layout_marginTop="4dp"
+            android:text="Service stopped"
+            android:textColor="#9CA3AF"
+            android:textSize="14sp" />
+
+        <Button
+            android:id="@+id/permissionButton"
+            android:layout_width="match_parent"
+            android:layout_height="wrap_content"
+            android:layout_marginTop="20dp"
+            android:text="Grant Audio Permission" />
+
+        <com.google.android.material.switchmaterial.SwitchMaterial
+            android:id="@+id/serviceToggle"
+            android:layout_width="wrap_content"
+            android:layout_height="wrap_content"
+            android:layout_marginTop="16dp"
+            android:text="Enable system-wide Auto-EQ"
+            android:textColor="#F9FAFB" />
+
+        <com.google.android.material.switchmaterial.SwitchMaterial
+            android:id="@+id/autoModeToggle"
+            android:layout_width="wrap_content"
+            android:layout_height="wrap_content"
+            android:layout_marginTop="8dp"
+            android:checked="true"
+            android:text="Auto mode (analyze &amp; adjust automatically)"
+            android:textColor="#F9FAFB" />
+
+        <TextView
+            android:layout_width="match_parent"
+            android:layout_height="wrap_content"
+            android:layout_marginTop="24dp"
+            android:text="Manual bands (used when Auto mode is off)"
+            android:textColor="#9CA3AF"
+            android:textSize="12sp" />
+
+        <LinearLayout
+            android:layout_width="match_parent"
+            android:layout_height="wrap_content"
+            android:layout_marginTop="8dp"
+            android:orientation="vertical">
+
+            <LinearLayout android:layout_width="match_parent" android:layout_height="wrap_content" android:orientation="horizontal" android:gravity="center_vertical">
+                <TextView android:layout_width="80dp" android:layout_height="wrap_content" android:text="60 Hz" android:textColor="#9CA3AF" />
+                <SeekBar android:id="@+id/band0" android:layout_width="0dp" android:layout_weight="1" android:layout_height="wrap_content" android:max="30" android:progress="15" />
+            </LinearLayout>
+
+            <LinearLayout android:layout_width="match_parent" android:layout_height="wrap_content" android:orientation="horizontal" android:gravity="center_vertical">
+                <TextView android:layout_width="80dp" android:layout_height="wrap_content" android:text="250 Hz" android:textColor="#9CA3AF" />
+                <SeekBar android:id="@+id/band1" android:layout_width="0dp" android:layout_weight="1" android:layout_height="wrap_content" android:max="30" android:progress="15" />
+            </LinearLayout>
+
+            <LinearLayout android:layout_width="match_parent" android:layout_height="wrap_content" android:orientation="horizontal" android:gravity="center_vertical">
+                <TextView android:layout_width="80dp" android:layout_height="wrap_content" android:text="1 kHz" android:textColor="#9CA3AF" />
+                <SeekBar android:id="@+id/band2" android:layout_width="0dp" android:layout_weight="1" android:layout_height="wrap_content" android:max="30" android:progress="15" />
+            </LinearLayout>
+
+            <LinearLayout android:layout_width="match_parent" android:layout_height="wrap_content" android:orientation="horizontal" android:gravity="center_vertical">
+                <TextView android:layout_width="80dp" android:layout_height="wrap_content" android:text="4 kHz" android:textColor="#9CA3AF" />
+                <SeekBar android:id="@+id/band3" android:layout_width="0dp" android:layout_weight="1" android:layout_height="wrap_content" android:max="30" android:progress="15" />
+            </LinearLayout>
+
+            <LinearLayout android:layout_width="match_parent" android:layout_height="wrap_content" android:orientation="horizontal" android:gravity="center_vertical">
+                <TextView android:layout_width="80dp" android:layout_height="wrap_content" android:text="16 kHz" android:textColor="#9CA3AF" />
+                <SeekBar android:id="@+id/band4" android:layout_width="0dp" android:layout_weight="1" android:layout_height="wrap_content" android:max="30" android:progress="15" />
+            </LinearLayout>
+
+        </LinearLayout>
+
+        <TextView
+            android:layout_width="match_parent"
+            android:layout_height="wrap_content"
+            android:layout_marginTop="24dp"
+            android:text="Note: works on the mix session Android exposes to apps (session 0). Coverage varies by device and by app — some apps (exclusive/offloaded audio, some DRM playback) can't be reached this way. This is the same technique used by third-party system EQ apps; it is not guaranteed on every device."
+            android:textColor="#6B7280"
+            android:textSize="11sp" />
+
+    </LinearLayout>
+</ScrollView>
