@@ -42,6 +42,7 @@ class EqualizerService : Service() {
         const val ACTION_REQUEST_STATUS = "com.autoeq.app.REQUEST_STATUS"
         const val ACTION_SESSION_OPENED = "com.autoeq.app.SESSION_OPENED"
         const val ACTION_SESSION_CLOSED = "com.autoeq.app.SESSION_CLOSED"
+        const val ACTION_RETRY_VISUALIZER = "com.autoeq.app.RETRY_VISUALIZER"
         const val EXTRA_BAND_INDEX = "band_index"
         const val EXTRA_BAND_MILLIBEL = "band_millibel"
         const val EXTRA_PRESET_LABEL = "preset_label"
@@ -117,6 +118,9 @@ class EqualizerService : Service() {
                     detachCurrentSession("Session closed by $attachedPackageName - waiting for a new one")
                 }
             }
+            ACTION_RETRY_VISUALIZER -> {
+                retryVisualizerOnCurrentSession()
+            }
         }
         return START_STICKY
     }
@@ -175,8 +179,45 @@ class EqualizerService : Service() {
         broadcastStatus()
     }
 
-    private fun detachCurrentSession(reason: String) {
-        releaseEffects()
+    /**
+     * Re-attempts creating the Visualizer on whatever session is currently
+     * attached, without touching the Equalizer - used right after the user
+     * grants RECORD_AUDIO so they don't have to replay the track again.
+     */
+    private fun retryVisualizerOnCurrentSession() {
+        val sessionId = attachedSessionId ?: run {
+            lastVizStatus = "No session attached yet to retry on"
+            broadcastStatus()
+            return
+        }
+        try { visualizer?.enabled = false } catch (_: Exception) {}
+        try { visualizer?.release() } catch (_: Exception) {}
+        visualizer = null
+
+        try {
+            visualizer = Visualizer(sessionId).apply {
+                captureSize = Visualizer.getCaptureSizeRange()[1]
+                setDataCaptureListener(object : Visualizer.OnDataCaptureListener {
+                    override fun onWaveFormDataCapture(v: Visualizer?, waveform: ByteArray?, samplingRate: Int) {}
+                    override fun onFftDataCapture(v: Visualizer?, fft: ByteArray?, samplingRate: Int) {
+                        captureCount++
+                        if (autoMode && fft != null && fft.size >= 4) {
+                            analyzeAndAdjust(fft, samplingRate)
+                        }
+                        if (captureCount % 10 == 0) broadcastStatus()
+                    }
+                }, Visualizer.getMaxCaptureRate() / 2, false, true)
+                enabled = true
+            }
+            lastVizStatus = "Attached to session $sessionId (retried)"
+        } catch (e: Exception) {
+            visualizer = null
+            lastVizStatus = "Retry FAILED for session $sessionId: ${e.javaClass.simpleName}: ${e.message}"
+        }
+        broadcastStatus()
+    }
+
+    private fun detachCurrentSession(reason: String) {        releaseEffects()
         attachedSessionId = null
         attachedPackageName = ""
         lastEqStatus = reason

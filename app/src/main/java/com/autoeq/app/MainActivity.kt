@@ -217,6 +217,20 @@ class MainActivity : AppCompatActivity() {
             .show()
     }
 
+    override fun onRequestPermissionsResult(
+        requestCode: Int,
+        permissions: Array<out String>,
+        grantResults: IntArray
+    ) {
+        super.onRequestPermissionsResult(requestCode, permissions, grantResults)
+        val recordAudioIndex = permissions.indexOf(Manifest.permission.RECORD_AUDIO)
+        if (recordAudioIndex != -1 && grantResults.getOrNull(recordAudioIndex) == PackageManager.PERMISSION_GRANTED) {
+            val intent = Intent(this, EqualizerService::class.java)
+            intent.action = EqualizerService.ACTION_RETRY_VISUALIZER
+            try { startService(intent) } catch (_: Exception) {}
+        }
+    }
+
     override fun onResume() {
         super.onResume()
         val intent = Intent(this, EqualizerService::class.java)
@@ -244,14 +258,26 @@ class MainActivity : AppCompatActivity() {
     }
 
     private fun requestNotifPermissionIfNeeded() {
-        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.TIRAMISU) {
-            if (ContextCompat.checkSelfPermission(this, Manifest.permission.POST_NOTIFICATIONS)
-                != PackageManager.PERMISSION_GRANTED
-            ) {
-                ActivityCompat.requestPermissions(
-                    this, arrayOf(Manifest.permission.POST_NOTIFICATIONS), 100
-                )
-            }
+        val needed = mutableListOf<String>()
+
+        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.TIRAMISU &&
+            ContextCompat.checkSelfPermission(this, Manifest.permission.POST_NOTIFICATIONS)
+            != PackageManager.PERMISSION_GRANTED
+        ) {
+            needed.add(Manifest.permission.POST_NOTIFICATIONS)
+        }
+
+        // Required for the Visualizer (spectrum analysis behind Auto mode) -
+        // reading audio content, even just to analyze it and not save/send
+        // it anywhere, is treated like recording by modern Android.
+        if (ContextCompat.checkSelfPermission(this, Manifest.permission.RECORD_AUDIO)
+            != PackageManager.PERMISSION_GRANTED
+        ) {
+            needed.add(Manifest.permission.RECORD_AUDIO)
+        }
+
+        if (needed.isNotEmpty()) {
+            ActivityCompat.requestPermissions(this, needed.toTypedArray(), 100)
         }
     }
 }
