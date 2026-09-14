@@ -76,10 +76,31 @@ class MainActivity : AppCompatActivity() {
             override fun onItemSelected(parent: AdapterView<*>?, view: android.view.View?, position: Int, id: Long) {
                 if (position !in presetLabels.indices) return
                 val label = presetLabels[position]
-                val intent = Intent(this@MainActivity, EqualizerService::class.java)
-                intent.action = EqualizerService.ACTION_SET_PRESET
-                intent.putExtra(EqualizerService.EXTRA_PRESET_LABEL, label)
-                startService(intent)
+                val preset = EqPreset.fromLabel(label)
+
+                // Tell the service (used inside Auto mode's calculation)
+                val presetIntent = Intent(this@MainActivity, EqualizerService::class.java)
+                presetIntent.action = EqualizerService.ACTION_SET_PRESET
+                presetIntent.putExtra(EqualizerService.EXTRA_PRESET_LABEL, label)
+                startService(presetIntent)
+
+                // Also snap the manual sliders to this preset's curve so
+                // choosing a preset has an immediate, audible effect even
+                // with Auto mode off - previously presets only fed into
+                // Auto mode's math and did nothing visible in Manual mode.
+                preset.offsetsDb.forEachIndexed { i, db ->
+                    if (i < bandSeekBars.size && i < valueLabels.size) {
+                        val sliderProgress = ((db * 10).toInt() + 120).coerceIn(0, 240)
+                        bandSeekBars[i].progress = sliderProgress
+                        valueLabels[i].text = String.format("%.1f", db)
+
+                        val bandIntent = Intent(this@MainActivity, EqualizerService::class.java)
+                        bandIntent.action = EqualizerService.ACTION_SET_BAND
+                        bandIntent.putExtra(EqualizerService.EXTRA_BAND_INDEX, i)
+                        bandIntent.putExtra(EqualizerService.EXTRA_BAND_MILLIBEL, (db * 100).toInt())
+                        startService(bandIntent)
+                    }
+                }
             }
             override fun onNothingSelected(parent: AdapterView<*>?) {}
         }
@@ -157,13 +178,14 @@ class MainActivity : AppCompatActivity() {
                 layoutParams = colParams
             }
 
-            // Vertical slider via rotation trick, sized up front so no
-            // runtime remeasure/resize is needed.
-            val seekBar = SeekBar(this).apply {
+            // Real vertical slider: final on-screen box is thin (width)
+            // and tall (height) - VerticalSeekBar handles the internal
+            // rotation and touch remapping itself, no rotation attribute
+            // or post-layout resize hack needed here.
+            val seekBar = VerticalSeekBar(this).apply {
                 max = 240 // -12.0dB..+12.0dB in 0.1dB steps
                 progress = 120 // 0 dB
-                rotation = 270f
-                layoutParams = LinearLayout.LayoutParams(sliderLengthPx, sliderThicknessPx)
+                layoutParams = LinearLayout.LayoutParams(sliderThicknessPx, sliderLengthPx)
                 try {
                     progressDrawable = ContextCompat.getDrawable(this@MainActivity, R.drawable.vertical_slider_track)
                 } catch (_: Exception) {
