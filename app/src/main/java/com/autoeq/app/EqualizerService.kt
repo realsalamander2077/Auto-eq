@@ -8,7 +8,9 @@ import android.content.Intent
 import android.media.audiofx.Equalizer
 import android.media.audiofx.Visualizer
 import android.os.Build
+import android.os.Handler
 import android.os.IBinder
+import android.os.Looper
 import androidx.core.app.NotificationCompat
 import kotlin.math.ln
 import kotlin.math.max
@@ -126,9 +128,13 @@ class EqualizerService : Service() {
     }
 
     /**
-     * Attaches fresh Equalizer + Visualizer instances to a real,
-     * playback-reported audio session. Releases any previous session's
-     * effects first.
+     * Attaches a fresh Equalizer to a real, playback-reported audio
+     * session immediately (gain control has consistently worked on the
+     * first try), then attempts the Visualizer with a short delay and
+     * one automatic retry - the session-open broadcast can fire before
+     * the underlying audio pipeline has fully spun up, which is a known
+     * cause of the raw-capture engine failing on the very first attempt
+     * even when the session itself is otherwise valid.
      */
     private fun attachToSession(sessionId: Int, packageName: String) {
         if (attachedSessionId == sessionId) return // already on it
@@ -154,29 +160,61 @@ class EqualizerService : Service() {
             lastEqStatus = "FAILED for session $sessionId: ${e.javaClass.simpleName}: ${e.message}"
         }
 
-        try {
-            visualizer = Visualizer(sessionId).apply {
-                captureSize = Visualizer.getCaptureSizeRange()[1]
-                setDataCaptureListener(object : Visualizer.OnDataCaptureListener {
-                    override fun onWaveFormDataCapture(v: Visualizer?, waveform: ByteArray?, samplingRate: Int) {}
-                    override fun onFftDataCapture(v: Visualizer?, fft: ByteArray?, samplingRate: Int) {
-                        captureCount++
-                        if (autoMode && fft != null && fft.size >= 4) {
-                            analyzeAndAdjust(fft, samplingRate)
-                        }
-                        if (captureCount % 10 == 0) broadcastStatus()
-                    }
-                }, Visualizer.getMaxCaptureRate() / 2, false, true)
-                enabled = true
-            }
-            lastVizStatus = "Attached to session $sessionId"
-        } catch (e: Exception) {
-            visualizer = null
-            lastVizStatus = "FAILED for session $sessionId: ${e.javaClass.simpleName}: ${e.message}"
-        }
-
+        lastVizStatus = "Waiting briefly before attaching analyzer…"
         updateNotification()
         broadcastStatus()
+
+        val handler = Handler(Looper.getMainLooper())
+        handler.postDelayed({
+            if (attachedSessionId != sessionId) return@postDelayed // session changed while we waited
+            val firstTrySucceeded = tryAttachVisualizer(sessionId)
+            if (!firstTrySucceeded) {
+                handler.postDelayed({
+                    if (attachedSessionId == sessionId) {
+                        tryAttachVisualizer(sessionId, isRetry = true)
+                    }
+                }, 1200)
+            }
+        }, 400)
+    }
+
+    /**
+     * One attempt at creating the Visualizer on the given session.
+     * Returns true on success. Each configuration step is guarded
+     * separately so a failure partway through doesn't leave a half
+     * configured object mistaken for a working one.
+     */
+    private fun tryAttachVisualizer(sessionId: Int, isRetry: Boolean = false): Boolean {
+        try { visualizer?.enabled = false } catch (_: Exception) {}
+        try { visualizer?.release() } catch (_: Exception) {}
+        visualizer = null
+
+        return try {
+            val v = Visualizer(sessionId)
+            v.captureSize = Visualizer.getCaptureSizeRange()[1]
+            v.setDataCaptureListener(object : Visualizer.OnDataCaptureListener {
+                override fun onWaveFormDataCapture(vv: Visualizer?, waveform: ByteArray?, samplingRate: Int) {}
+                override fun onFftDataCapture(vv: Visualizer?, fft: ByteArray?, samplingRate: Int) {
+                    captureCount++
+                    if (autoMode && fft != null && fft.size >= 4) {
+                        analyzeAndAdjust(fft, samplingRate)
+                    }
+                    if (captureCount % 10 == 0) broadcastStatus()
+                }
+            }, Visualizer.getMaxCaptureRate() / 2, false, true)
+            v.enabled = true
+            visualizer = v
+            lastVizStatus = "Attached to session $sessionId" + if (isRetry) " (on retry)" else ""
+            broadcastStatus()
+            true
+        } catch (e: Exception) {
+            visualizer = null
+            val attempt = if (isRetry) "Retry" else "First attempt"
+            lastVizStatus = "$attempt FAILED for session $sessionId: ${e.javaClass.simpleName}: ${e.message}" +
+                if (!isRetry) " - retrying in 1.2s…" else " - this session's audio pipeline likely doesn't support raw capture on this device."
+            broadcastStatus()
+            false
+        }
     }
 
     /**
@@ -190,31 +228,7 @@ class EqualizerService : Service() {
             broadcastStatus()
             return
         }
-        try { visualizer?.enabled = false } catch (_: Exception) {}
-        try { visualizer?.release() } catch (_: Exception) {}
-        visualizer = null
-
-        try {
-            visualizer = Visualizer(sessionId).apply {
-                captureSize = Visualizer.getCaptureSizeRange()[1]
-                setDataCaptureListener(object : Visualizer.OnDataCaptureListener {
-                    override fun onWaveFormDataCapture(v: Visualizer?, waveform: ByteArray?, samplingRate: Int) {}
-                    override fun onFftDataCapture(v: Visualizer?, fft: ByteArray?, samplingRate: Int) {
-                        captureCount++
-                        if (autoMode && fft != null && fft.size >= 4) {
-                            analyzeAndAdjust(fft, samplingRate)
-                        }
-                        if (captureCount % 10 == 0) broadcastStatus()
-                    }
-                }, Visualizer.getMaxCaptureRate() / 2, false, true)
-                enabled = true
-            }
-            lastVizStatus = "Attached to session $sessionId (retried)"
-        } catch (e: Exception) {
-            visualizer = null
-            lastVizStatus = "Retry FAILED for session $sessionId: ${e.javaClass.simpleName}: ${e.message}"
-        }
-        broadcastStatus()
+        tryAttachVisualizer(sessionId, isRetry = true)
     }
 
     private fun detachCurrentSession(reason: String) {        releaseEffects()
