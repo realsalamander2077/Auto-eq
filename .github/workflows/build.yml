@@ -8,6 +8,8 @@ on:
 jobs:
   build:
     runs-on: ubuntu-latest
+    env:
+      ANDROID_SDK_ROOT: /usr/local/lib/android/sdk
     steps:
       - name: Checkout code
         uses: actions/checkout@v4
@@ -18,8 +20,16 @@ jobs:
           distribution: 'temurin'
           java-version: '17'
 
-      - name: Set up Android SDK
-        uses: android-actions/setup-android@v3
+      # GitHub's ubuntu-latest runners already ship with an Android SDK
+      # and command-line tools preinstalled - accepting licenses directly
+      # against that is far more reliable than third-party actions that
+      # try to detect/re-download a "correct" version of the tools, which
+      # has been the actual source of build failures here.
+      - name: Accept Android SDK licenses
+        run: yes | "$ANDROID_SDK_ROOT/cmdline-tools/latest/bin/sdkmanager" --licenses > /dev/null || true
+
+      - name: Ensure required SDK platform is installed
+        run: "$ANDROID_SDK_ROOT/cmdline-tools/latest/bin/sdkmanager" "platforms;android-34" "build-tools;34.0.0" > /dev/null
 
       - name: Setup Gradle
         uses: gradle/actions/setup-gradle@v4
